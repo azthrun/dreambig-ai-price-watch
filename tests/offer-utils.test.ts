@@ -71,4 +71,35 @@ describe("normalizeAndFilterOffers", () => {
     expect(result.offers).toHaveLength(1);
     expect(result.offers[0]?.storeName).toBe("Target");
   });
+
+  it("keeps only one row per store using lowest total", () => {
+    const result = normalizeAndFilterOffers(
+      [
+        offer({
+          storeName: "Best Buy",
+          productUrl: "https://bestbuy.com/a",
+          priceAmount: 500,
+          shippingAmount: 20
+        }),
+        offer({
+          storeName: "best   buy",
+          productUrl: "https://bestbuy.com/b",
+          priceAmount: 490,
+          shippingAmount: 25
+        }),
+        offer({
+          storeName: "Target",
+          productUrl: "https://target.com/a",
+          priceAmount: 540,
+          shippingAmount: 0
+        })
+      ],
+      ["best buy", "target"],
+      5
+    );
+
+    expect(result.offers).toHaveLength(2);
+    expect(result.offers[0]?.storeName.toLowerCase()).toContain("best");
+    expect(result.offers[0]?.totalAmount).toBe(515);
+  });
 });

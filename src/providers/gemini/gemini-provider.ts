@@ -3,6 +3,7 @@ import { z } from "zod";
 import { OfferRow } from "../../domain/types.js";
 
 export interface OfferProvider {
+  resolveProductModels(productName: string): Promise<string[]>;
   fetchOffers(productName: string): Promise<OfferRow[]>;
 }
 
@@ -31,6 +32,23 @@ const rawOfferSchema = z.object({
 const payloadSchema = z.object({
   offers: z.array(rawOfferSchema)
 });
+
+const modelResolutionSchema = z.object({
+  productModels: z.array(z.string().min(1)).max(2)
+});
+
+function buildModelResolutionPrompt(productName: string): string {
+  return [
+    "You are resolving a product query into concrete product models.",
+    `Input query: ${productName}`,
+    "Rules:",
+    "- If query clearly maps to one model, return one item.",
+    "- If query is ambiguous, return at most two likely models.",
+    "- Return strict JSON only with this shape:",
+    '{"productModels":["model 1","model 2"]}',
+    "- Do not include markdown fences."
+  ].join("\n");
+}
 
 function buildPrompt(productName: string): string {
   return [
@@ -83,6 +101,29 @@ export class GeminiOfferProvider implements OfferProvider {
     this.model = options.model;
     this.timeoutMs = options.timeoutMs;
     this.retries = options.retries;
+  }
+
+  async resolveProductModels(productName: string): Promise<string[]> {
+    try {
+      const response = await withTimeout(
+        this.client.models.generateContent({
+          model: this.model,
+          contents: buildModelResolutionPrompt(productName),
+          config: {
+            temperature: 0.1
+          }
+        }),
+        this.timeoutMs
+      );
+
+      const text = stripCodeFences(response.text ?? "");
+      const json = JSON.parse(text);
+      const parsed = modelResolutionSchema.parse(json);
+      const deduped = [...new Set(parsed.productModels.map((x) => x.trim()).filter(Boolean))];
+      return deduped.slice(0, 2);
+    } catch {
+      return [productName];
+    }
   }
 
   async fetchOffers(productName: string): Promise<OfferRow[]> {

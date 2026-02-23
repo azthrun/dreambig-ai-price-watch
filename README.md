@@ -1,15 +1,17 @@
 # DreamBig AI Price Watch
 
-Node.js scheduled container application that queries Gemini 2.5 Flash for U.S. trusted seller offers and emails price watch reports.
+A Node.js container app that runs on a CRON schedule, finds trusted U.S. product offers with Gemini 2.5 Flash, and sends HTML/text email reports.
 
-## What It Does
-- Runs on a CRON schedule inside a Linux container.
-- Watches multiple products from one delimited env var.
-- Uses Gemini 2.5 Flash with web grounding (`googleSearch` tool).
-- Filters to trusted U.S. sellers only.
-- Includes Costco member offers, excludes other membership-gated offers by default.
-- Ranks by total price (`product + shipping`) and reports top 3-5 offers per product.
-- Sends HTML + text email report with columns:
+## Features
+- Scheduled execution inside a Linux container (`node-cron`).
+- Multiple watched products from one delimited variable.
+- Gemini 2.5 Flash with Google Search grounding (`googleSearch` tool).
+- U.S.-only filtering and trusted-seller filtering.
+- Costco member offers allowed; other membership-gated offers excluded.
+- One row per store per product (keeps lowest total for that store).
+- Ambiguous product input is resolved into up to 2 likely models and reported as separate product sections.
+- Ranking by total price: `product price + shipping price`.
+- Email table columns:
   - Product Price
   - Shipping Price
   - Total Price
@@ -18,16 +20,30 @@ Node.js scheduled container application that queries Gemini 2.5 Flash for U.S. t
   - Discount
   - Notes
 
+## Runtime Flow
+1. Load and validate env config (`zod`).
+2. Resolve each input product into 1-2 model candidates (Gemini).
+3. Fetch offers per resolved model (Gemini + web grounding).
+4. Normalize/filter offers:
+   - U.S. shippable only
+   - trusted sellers only
+   - membership rule enforcement
+   - dedupe to one row per store
+5. Rank by total price and keep top 3-5 rows.
+6. Send one email per run with all product sections.
+
 ## Tech Stack
-- Node.js 20 + TypeScript
-- `@google/genai` for Gemini API
-- `node-cron` for scheduling
-- `nodemailer` for SMTP email
-- `zod` for config validation
-- `vitest` for tests
+- Node.js 20
+- TypeScript
+- `@google/genai`
+- `node-cron`
+- `nodemailer`
+- `zod`
+- `pino`
+- `vitest`
 
 ## Environment Variables
-Required:
+Required by app logic:
 - `GEMINI_API_KEY`
 - `CRON_SCHEDULE`
 - `WATCHED_PRODUCTS`
@@ -43,109 +59,81 @@ Optional:
 - `PRODUCT_DELIMITER` (default: `|`)
 - `EMAIL_DELIMITER` (default: `,`)
 - `TRUSTED_SELLERS` (default: `best buy|target|costco|walmart`)
-- `TIMEZONE` (default: `UTC`)
-- `MAX_RESULTS_PER_PRODUCT` (default: `5`, range `3-5`)
+- `TIMEZONE` (default in app: `UTC`; local compose sets `America/Chicago`)
+- `MAX_RESULTS_PER_PRODUCT` (default: `5`, allowed: `3-5`)
 - `CONCURRENCY` (default: `3`)
 - `REQUEST_TIMEOUT_MS` (default: `30000`)
-- `REQUEST_RETRIES` (default: `2`)
+- `REQUEST_RETRIES` (default: `2` in app; local compose sets `1`)
 - `RUN_ON_STARTUP` (default: `false`)
 - `LOG_LEVEL` (default: `info`)
 
-## Local Development (Without Docker)
+## Project Structure
+- `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/src/config` - env parsing/validation
+- `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/src/providers/gemini` - model resolution and offer retrieval
+- `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/src/domain` - offer normalization/filtering/ranking
+- `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/src/email` - email rendering and SMTP sender
+- `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/src/scheduler` - cron scheduler
+- `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/src/app` - run orchestration
+
+## Local Development
 ```bash
 npm install
 npm run test
+npm run build
 npm run dev
 ```
 
-## Local Docker Test (Required Before NAS Deploy)
+## Local Docker Test
+`docker-compose.local.yml` is self-contained with inline defaults.
 
-### 1. Optional: create `.env` for overrides
-```bash
-cat > .env <<'ENV'
-GEMINI_API_KEY=YOUR_KEY
-CRON_SCHEDULE=0 12 */3 * *
-WATCHED_PRODUCTS=iphone 16 pro|sony wh-1000xm5|macbook air m3
-RECIPIENT_EMAILS=you@example.com,friend@example.com
-PRODUCT_DELIMITER=|
-EMAIL_DELIMITER=,
-TRUSTED_SELLERS=best buy|target|costco|walmart
-TIMEZONE=America/New_York
-MAX_RESULTS_PER_PRODUCT=5
-CONCURRENCY=3
-REQUEST_TIMEOUT_MS=30000
-REQUEST_RETRIES=2
-RUN_ON_STARTUP=false
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=smtp-user
-SMTP_PASS=smtp-pass
-SMTP_FROM=alerts@example.com
-LOG_LEVEL=info
-ENV
-```
-
-### 2. Build + run container
+Run:
 ```bash
 docker compose -f docker-compose.local.yml up --build
 ```
 
-`docker-compose.local.yml` has inline defaults so local tests can run without any env file.
-If you do create `.env`, compose will use those values as overrides.
-
-### 3. Validate behavior
-- Container logs show `Scheduler started`.
-- Initial run executes only if `RUN_ON_STARTUP=true`.
-- Email arrives with per-product offer tables.
-- Rows are sorted by total price and include shipping.
-
-Cron note:
-- `0 12 */3 * *` means at 12:00 PM on every 3rd day-of-month (3, 6, 9, ...), not a strict rolling every-72-hours interval.
-
-### 4. Stop
+Stop:
 ```bash
 docker compose -f docker-compose.local.yml down
 ```
 
-## Synology NAS Deployment (Container Manager, Compose Project)
+Override any value at runtime (no `.env` required):
+```bash
+CRON_SCHEDULE='*/5 * * * *' RUN_ON_STARTUP='false' docker compose -f docker-compose.local.yml up --build
+```
 
-### 1. Build and push image
-From your development machine:
+Cron note:
+- `*/5 * * * *` = every 5 minutes.
+- `0 12 */3 * *` = 12:00 PM on days 3,6,9... of each month (not rolling every 72 hours).
+
+## Synology NAS Deployment (Compose Project)
+1. Build and push image:
 ```bash
 docker build -t YOUR_REGISTRY/dreambig-ai-price-watch:latest .
 docker push YOUR_REGISTRY/dreambig-ai-price-watch:latest
 ```
+2. Open `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/docker-compose.synology.yml`.
+3. Set `image` to your registry image and update all environment values.
+4. In Synology Container Manager:
+   - Project -> Create -> Create `docker-compose.yml`
+   - Paste the updated compose content
+   - Deploy
+5. Verify logs and email delivery.
 
-### 2. Prepare Synology compose file
-- Copy `docker-compose.synology.yml`.
-- Set `image` to your pushed image.
-- Replace all placeholder environment values.
+## Testing
+```bash
+npm run test
+npm run lint
+npm run build
+```
 
-### 3. Open Synology Container Manager
-1. Go to **Project**.
-2. Click **Create**.
-3. Choose **Create docker-compose.yml**.
-4. Paste the compose from `docker-compose.synology.yml` (updated values).
-5. Save and deploy.
+Current automated coverage includes:
+- env parsing defaults and delimiters
+- offer filtering/ranking behavior
+- one-row-per-store deduplication
+- ambiguous-product split into two models
+- email template rendering
 
-### 4. Verify on NAS
-1. Container status is running.
-2. Logs show successful startup and schedule registration.
-3. Test mail is delivered on first run.
-4. Subsequent runs follow `CRON_SCHEDULE`.
-
-### 5. Update configuration
-- Edit project environment variables in Container Manager.
-- Redeploy project after changes.
-
-## Scripts
-- `npm run dev` - Run app via `tsx`.
-- `npm run build` - Compile TypeScript to `dist/`.
-- `npm run start` - Run compiled app.
-- `npm run test` - Run test suite.
-- `npm run lint` - Type-check.
-
-## Notes and Limitations
-- Offer trust classification from model output is validated with local filters, but still heuristic.
+## Notes
+- Seller trust classification still includes model-assisted heuristics.
 - Currency conversion is not implemented in v1.
-- The app sends one email per run containing all watched products.
+- If scheduler config is invalid, app fails fast before running startup jobs.

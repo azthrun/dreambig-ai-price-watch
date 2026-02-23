@@ -21,6 +21,10 @@ function isCostcoOffer(offer: OfferRow): boolean {
   return store.includes("costco") || host.includes("costco");
 }
 
+function normalizeStoreName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function isTrustedSeller(offer: OfferRow, trustedSellers: string[]): boolean {
   if (
     offer.sourceTrustLevel === "official_manufacturer" ||
@@ -65,7 +69,7 @@ export function normalizeAndFilterOffers(
 ): { offers: OfferRow[]; warnings: string[] } {
   const warnings: string[] = [];
 
-  const accepted = offers
+  const filtered = offers
     .map(recomputeTotal)
     .filter((offer) => {
       if (!offer.shipsToUs) {
@@ -81,7 +85,18 @@ export function normalizeAndFilterOffers(
         return false;
       }
       return true;
-    })
+    });
+
+  const bestByStore = new Map<string, OfferRow>();
+  for (const offer of filtered) {
+    const key = normalizeStoreName(offer.storeName);
+    const current = bestByStore.get(key);
+    if (!current || offer.totalAmount < current.totalAmount) {
+      bestByStore.set(key, offer);
+    }
+  }
+
+  const accepted = [...bestByStore.values()]
     .sort((a, b) => a.totalAmount - b.totalAmount)
     .slice(0, maxResultsPerProduct);
 

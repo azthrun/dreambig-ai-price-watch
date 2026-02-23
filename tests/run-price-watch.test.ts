@@ -46,10 +46,11 @@ describe("runPriceWatch", () => {
   it("processes products and sends one email", async () => {
     const send = vi.fn(async () => {});
     const fetchOffers = vi.fn(async (product: string) => [makeOffer(product)]);
+    const resolveProductModels = vi.fn(async (product: string) => [product]);
 
     await runPriceWatch({
       config,
-      offerProvider: { fetchOffers },
+      offerProvider: { fetchOffers, resolveProductModels },
       emailSender: { send },
       logger: {
         info: vi.fn(),
@@ -59,6 +60,32 @@ describe("runPriceWatch", () => {
     });
 
     expect(fetchOffers).toHaveBeenCalledTimes(2);
+    expect(resolveProductModels).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("splits an ambiguous product into up to two models", async () => {
+    const send = vi.fn(async () => {});
+    const fetchOffers = vi.fn(async (product: string) => [makeOffer(product)]);
+    const resolveProductModels = vi.fn(async (product: string) =>
+      product === "p1" ? ["p1 model a", "p1 model b"] : [product]
+    );
+
+    await runPriceWatch({
+      config,
+      offerProvider: { fetchOffers, resolveProductModels },
+      emailSender: { send },
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
+      }
+    });
+
+    expect(fetchOffers).toHaveBeenCalledTimes(3);
+    expect(fetchOffers).toHaveBeenCalledWith("p1 model a");
+    expect(fetchOffers).toHaveBeenCalledWith("p1 model b");
+    expect(fetchOffers).toHaveBeenCalledWith("p2");
     expect(send).toHaveBeenCalledTimes(1);
   });
 });

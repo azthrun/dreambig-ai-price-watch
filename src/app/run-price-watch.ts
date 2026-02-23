@@ -20,30 +20,38 @@ interface RunDependencies {
 }
 
 async function processProduct(
-  productName: string,
+  inputProductName: string,
+  resolvedProductName: string,
+  disambiguationNote: string | null,
   deps: RunDependencies
 ): Promise<ProductResult> {
   try {
-    const rawOffers = await deps.offerProvider.fetchOffers(productName);
+    const rawOffers = await deps.offerProvider.fetchOffers(resolvedProductName);
     const { offers, warnings } = normalizeAndFilterOffers(
       rawOffers,
       deps.config.trustedSellers,
       deps.config.maxResultsPerProduct
     );
+    if (disambiguationNote) {
+      warnings.unshift(disambiguationNote);
+    }
 
     return {
-      productName,
+      productName: resolvedProductName,
       offers,
       warnings
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown processing error";
-    deps.logger.error({ productName, error: message }, "Product processing failed");
+    deps.logger.error(
+      { inputProductName, resolvedProductName, error: message },
+      "Product processing failed"
+    );
 
     return {
-      productName,
+      productName: resolvedProductName,
       offers: [],
-      warnings: [],
+      warnings: disambiguationNote ? [disambiguationNote] : [],
       error: message
     };
   }
@@ -61,9 +69,40 @@ export async function runPriceWatch(deps: RunDependencies): Promise<void> {
 
   const limit = pLimit(deps.config.concurrency);
 
+  const tasks = (
+    await Promise.all(
+      deps.config.watchedProducts.map(async (inputProductName) => {
+        const resolvedModels = await deps.offerProvider.resolveProductModels(inputProductName);
+        if (resolvedModels.length <= 1) {
+          return [
+            {
+              inputProductName,
+              resolvedProductName: resolvedModels[0] ?? inputProductName,
+              disambiguationNote: null as string | null
+            }
+          ];
+        }
+
+        const note = `Input product was ambiguous. Results are split into up to ${resolvedModels.length} likely models.`;
+        return resolvedModels.map((resolvedProductName) => ({
+          inputProductName,
+          resolvedProductName,
+          disambiguationNote: note
+        }));
+      })
+    )
+  ).flat();
+
   const results = await Promise.all(
-    deps.config.watchedProducts.map((productName) =>
-      limit(() => processProduct(productName, deps))
+    tasks.map((task) =>
+      limit(() =>
+        processProduct(
+          task.inputProductName,
+          task.resolvedProductName,
+          task.disambiguationNote,
+          deps
+        )
+      )
     )
   );
 
