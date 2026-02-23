@@ -1,0 +1,27 @@
+version: "3.9"
+services:
+  dreambig-price-watch:
+    image: dreambig-ai-price-watch:latest
+    container_name: dreambig-ai-price-watch
+    restart: unless-stopped
+    environment:
+      GEMINI_API_KEY: "REPLACE_WITH_GEMINI_API_KEY"
+      MODEL_NAME: "gemini-2.5-flash"
+      CRON_SCHEDULE: "0 */6 * * *"
+      WATCHED_PRODUCTS: "iphone 16 pro|sony wh-1000xm5|macbook air m3"
+      RECIPIENT_EMAILS: "you@example.com,team@example.com"
+      PRODUCT_DELIMITER: "|"
+      EMAIL_DELIMITER: ","
+      TRUSTED_SELLERS: "best buy|target|costco|walmart"
+      TIMEZONE: "America/New_York"
+      MAX_RESULTS_PER_PRODUCT: "5"
+      CONCURRENCY: "3"
+      REQUEST_TIMEOUT_MS: "30000"
+      REQUEST_RETRIES: "2"
+      RUN_ON_STARTUP: "false"
+      SMTP_HOST: "smtp.example.com"
+      SMTP_PORT: "587"
+      SMTP_USER: "smtp-user"
+      SMTP_PASS: "smtp-password"
+      SMTP_FROM: "alerts@example.com"
+      LOG_LEVEL: "info"
