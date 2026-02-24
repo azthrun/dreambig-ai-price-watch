@@ -106,18 +106,29 @@ Cron note:
 - `0 12 */3 * *` = 12:00 PM on days 3,6,9... of each month (not rolling every 72 hours).
 
 ## Synology NAS Deployment (Compose Project)
-1. Build and push image:
+1. Build and push a multi-arch image (recommended for NAS compatibility):
 ```bash
-docker build -t YOUR_REGISTRY/dreambig-ai-price-watch:latest .
-docker push YOUR_REGISTRY/dreambig-ai-price-watch:latest
+docker buildx create --use --name multiarch-builder
+docker buildx inspect --bootstrap
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t YOUR_REGISTRY/dreambig-ai-price-watch:latest \
+  --push \
+  .
 ```
-2. Open `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/docker-compose.synology.yml`.
-3. Set `image` to your registry image and update all environment values.
-4. In Synology Container Manager:
+2. Verify manifest includes your NAS architecture:
+```bash
+docker buildx imagetools inspect YOUR_REGISTRY/dreambig-ai-price-watch:latest
+```
+3. Open `/Users/yunqichen/Developments/Projects/node-projects/dreambig-ai-price-watch/docker-compose.synology.yml`.
+4. Set `image` to your registry image and update all environment values.
+5. In Synology Container Manager:
    - Project -> Create -> Create `docker-compose.yml`
    - Paste the updated compose content
    - Deploy
-5. Verify logs and email delivery.
+6. Verify logs and email delivery.
+
+If you see `no matching manifest for linux/amd64 in the manifest list entries`, your pushed image is missing `linux/amd64`. Rebuild with `buildx --platform linux/amd64,linux/arm64`.
 
 ## Testing
 ```bash
